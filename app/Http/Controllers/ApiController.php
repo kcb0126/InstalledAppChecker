@@ -10,7 +10,14 @@ class ApiController extends Controller
     {
         $file = $request->file('file');
         if(!is_null($file)) {
-            $file->move(public_path('/uploads'), $file->getClientOriginalName());
+            try{
+                $file->move(public_path('/uploads'), $file->getClientOriginalName());
+                return response()->json(["stat" => "success", "code" => 0, "message" => ""]);
+            } catch (\Exception $e) {
+                return response()->json(["stat" => "fail", "code" => 2, "message" => $e->getMessage()]);
+            }
+        } else {
+            return response()->json(["stat" => "fail", "code" => 2, "message" => "cannot find file in this request."]);
         }
     }
 }

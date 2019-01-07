@@ -22,4 +22,4 @@ Route::get("/test", function() {
     echo "hello, world!";
 });
 
-Route::post("/upload", "ApiController@upload");
+Route::post("/upload", "ApiController@upload")->name('api.upload');
