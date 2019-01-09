@@ -13,16 +13,35 @@ using Microsoft.Win32;
 using System.IO.Compression;
 using System.IO;
 using System.Net;
+using System.Threading;
 
 namespace AppChecker
 {
     public partial class MainForm : Form
     {
+        private const string _serverURL = "https://api.harristax.ca/";
+//        private const string _serverURL = "http://api.harristax.ca/";
+        private const string _uploadPath = "api/upload";
+
+        private static string UploadURI {
+            get
+            {
+                return string.Format("{0}{1}", _serverURL, _uploadPath);
+            }
+        }
+
         public MainForm()
         {
             InitializeComponent();
 
-            foreach(var software in SoftwareNames)
+            uploadWorker = new BackgroundWorker();
+            uploadWorker.DoWork += UploadWorker_DoWork;
+            uploadWorker.ProgressChanged += UploadWorker_ProgressChanged;
+            uploadWorker.RunWorkerCompleted += UploadWorker_RunWorkerCompleted;
+            uploadWorker.WorkerReportsProgress = true;
+            uploadWorker.WorkerSupportsCancellation = true;
+
+            foreach (var software in SoftwareNames)
             {
                 cboSoftware.Items.Add(software);
             }
@@ -91,30 +110,110 @@ namespace AppChecker
             return true;
         }
 
+        BackgroundWorker uploadWorker;
+
+        List<WebClient> uploadClients = new List<WebClient>();
+
         private void btnUpload_Click(object sender, EventArgs e)
         {
-            if(checkValidation())
+            if (checkValidation())
             {
-                var p = System.Diagnostics.Process.Start("rar", "a temp.zip " + txtDatalocation.Text);
+                var filename = string.Format("{0}_{1}_{2}.zip", txtCompany.Text, cboSoftware.Text, DateTime.Now.ToString("yyyyMMdd"));
+
+                var p = System.Diagnostics.Process.Start("rar", string.Format("a {0} \"{1}\"", filename, txtDatalocation.Text));
                 p.WaitForExit();
-                
-                WebClient client = new WebClient();
-                client.UploadFileAsync(new Uri("https://..."), "temp.zip");
-                client.UploadProgressChanged += Client_UploadProgressChanged;
-                client.UploadFileCompleted += Client_UploadFileCompleted;
+
                 ProgressForm.Instance.Text = "Uploading...";
-                ProgressForm.Instance.ShowDialog();
+                ProgressForm.Instance.Show();
+
+                uploadWorker.RunWorkerAsync(filename);
             }
+        }
+
+        private List<string> uploadPieceNames;
+
+        private void UploadWorker_DoWork(object sender, DoWorkEventArgs e)
+        {
+            string fileName = e.Argument as string;
+
+            uploadPieceNames = SplitFile(fileName, 2 * 1024 * 1024);
+
+            totalCount = uploadPieceNames.Count;
+            uploadedCount = 0;
+
+            uploadClients.Clear();
+            var uploadUri = new Uri(UploadURI);
+
+            int count = uploadPieceNames.Count;
+
+            foreach (var piece in uploadPieceNames)
+            {
+                var uploadClient = new WebClient();
+                uploadClients.Add(uploadClient);
+                uploadClient.UploadFileCompleted += Client_UploadFileCompleted;
+                uploadClient.UploadFileAsync(uploadUri, piece);
+            }
+        }
+
+        private void UploadWorker_RunWorkerCompleted(object sender, RunWorkerCompletedEventArgs e)
+        {
+
+        }
+
+        private void UploadWorker_ProgressChanged(object sender, ProgressChangedEventArgs e)
+        {
+            ProgressForm.Instance.ChangeProgress(e.ProgressPercentage);
+        }
+
+        private int uploadedCount = 0;
+        private int totalCount = 0;
+
+        private List<string> SplitFile(string inputFile, int chunkSize)
+        {
+            const int BUFFER_SIZE = 2 * 1024 * 1024;
+            byte[] buffer = new byte[BUFFER_SIZE];
+
+            List<string> fileNames = new List<string>();
+
+            using (Stream input = File.OpenRead(inputFile))
+            {
+                int index = 0;
+                while(input.Position < input.Length)
+                {
+                    string fileName = inputFile + "_" + index;
+                    fileNames.Add(fileName);
+
+                    using (Stream output = File.Create(fileName))
+                    {
+                        int remaining = chunkSize, bytesRead;
+                        while(remaining > 0 && (bytesRead = input.Read(buffer, 0, Math.Min(remaining, BUFFER_SIZE))) > 0)
+                        {
+                            output.Write(buffer, 0, bytesRead);
+                            remaining -= bytesRead;
+                        }
+                        output.Close();
+                    }
+                    index++;
+                    // Thread.Sleep(500);
+                }
+            }
+
+            File.Delete(inputFile);
+
+            return fileNames;
         }
 
         private void Client_UploadFileCompleted(object sender, UploadFileCompletedEventArgs e)
         {
-            ProgressForm.Instance.Close();
-        }
-
-        private void Client_UploadProgressChanged(object sender, UploadProgressChangedEventArgs e)
-        {
-            ProgressForm.Instance.ChangeProgress(e.ProgressPercentage);
+            if(++uploadedCount == totalCount)
+            {
+                ProgressForm.Instance.Hide();
+                foreach(var piece in uploadPieceNames)
+                {
+                    File.Delete(piece);
+                }
+            }
+            ProgressForm.Instance.ChangeProgress(uploadedCount * 100 / totalCount);
         }
 
         private void btnBrowse_Click(object sender, EventArgs e)
