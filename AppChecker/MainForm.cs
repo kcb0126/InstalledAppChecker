@@ -20,7 +20,7 @@ namespace AppChecker
     public partial class MainForm : Form
     {
         private const string _serverURL = "https://api.harristax.ca/";
-//        private const string _serverURL = "http://api.harristax.ca/";
+//        private const string _serverURL = "http://127.0.0.1:8081/";
         private const string _uploadPath = "api/upload";
 
         private static string UploadURI {
@@ -178,9 +178,10 @@ namespace AppChecker
             using (Stream input = File.OpenRead(inputFile))
             {
                 int index = 0;
+                long count = (input.Length + (chunkSize - 1)) / chunkSize;
                 while(input.Position < input.Length)
                 {
-                    string fileName = inputFile + "_" + index;
+                    string fileName = inputFile + "__" + count + "_" + index;
                     fileNames.Add(fileName);
 
                     using (Stream output = File.Create(fileName))
